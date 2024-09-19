@@ -65,7 +65,7 @@ pub struct EsSearchResultHits {
 pub struct EsSearchResultHitsHit {
     pub _index: String,
     pub _id: String,
-    pub _score: f64,
+    pub _score: Option<f64>,
     pub _source: HashMap<String, Value>,
 }
 
@@ -163,16 +163,25 @@ impl Es {
         &self,
         index: &str,
         query: &Option<String>,
-        size: &Option<u16>,
+        order_by: &Option<String>,
+        limit: &Option<u16>,
     ) -> Result<EsSearchResult, Box<dyn Error>> {
         let target = &[index];
         let mut request = self.elasticsearch.search(SearchParts::Index(target));
+        let mut order_by_pairs = Vec::new();
         let mut body = json!({});
         match query {
-            Some(q) => request = request.q(q),
+            Some(x) => request = request.q(x),
             _ => body["query"] = json!({"match_all": {}}),
         }
-        match size {
+        match order_by {
+            Some(x) => {
+                order_by_pairs.push(x.as_str());
+                request = request.sort(order_by_pairs.as_slice())
+            }
+            _ => {}
+        }
+        match limit {
             Some(x) => {
                 body["size"] = json!(x);
             }

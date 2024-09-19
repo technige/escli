@@ -63,9 +63,12 @@ enum Commands {
         index: String,
         #[arg(help = "Lucene search query")]
         query: Option<String>,
+        #[arg(short = 'o', long = "order-by")]
+        #[arg(help = "Comma-separated list of FIELD:DIRECTION pairs")]
+        order_by: Option<String>,
         #[arg(short = 'l', long = "limit")]
-        #[arg(help = "Maximum number of search hits to return")]
-        size: Option<u16>,
+        #[arg(help = "Maximum number of search hits to return (default 10)")]
+        limit: Option<u16>,
         #[arg(short = 'f', long = "format")]
         #[arg(help = "Output format for search results")]
         #[arg(default_value_t = SearchResultFormat::Table, value_enum)]
@@ -116,10 +119,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Commands::Search {
             index,
             query,
-            size,
+            order_by,
+            limit,
             format,
         } => {
-            let result = &es.search(index, query, size).await?;
+            let result = &es.search(index, query, order_by, limit).await?;
             print_search_result(result, format);
         }
     }
