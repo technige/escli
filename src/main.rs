@@ -1,14 +1,13 @@
 mod client;
-mod tables;
+mod viz;
 
 use std::{collections::HashMap, error::Error};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::Value;
-use tabled::settings::Style;
 
 use client::{Es, EsBulkSummary, EsInfo, EsSearchResult};
-use tables::TabularData;
+use viz::DataTable;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -165,11 +164,11 @@ fn print_search_result(result: &EsSearchResult, format: &SearchResultFormat) {
             }
         }
         SearchResultFormat::Table => {
-            let mut data = TabularData::new();
+            let mut table = DataTable::new();
             for hit in result.hits.hits.iter() {
-                data.push_row(&hit._source);
+                table.push_document(&hit._source);
             }
-            println!("{}", data.to_table().with(Style::sharp()));
+            table.print();
         }
     }
 }

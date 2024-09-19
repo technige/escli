@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
-use tabled::builder::Builder;
+use tabled::{builder::Builder, settings::Style};
 
-pub struct TabularData {
+pub struct DataTable {
     column_names: Vec<String>,
     rows: Vec<Vec<String>>,
 }
 
-impl TabularData {
+impl DataTable {
     pub fn new() -> Self {
         Self {
             column_names: vec![],
@@ -16,7 +16,7 @@ impl TabularData {
         }
     }
 
-    pub fn push_row(&mut self, row: &HashMap<String, Value>) {
+    pub fn push_document(&mut self, row: &HashMap<String, Value>) {
         for (key, _value) in row.iter() {
             if !self.column_names.contains(key) {
                 self.column_names.push(key.to_owned());
@@ -37,12 +37,16 @@ impl TabularData {
         self.rows.push(string_values);
     }
 
-    pub fn to_table(&self) -> tabled::Table {
+    fn to_tabled_table(&self) -> tabled::Table {
         let mut builder = Builder::default();
         builder.push_record(self.column_names.clone());
         for row in self.rows.iter() {
             builder.push_record(row)
         }
         builder.build()
+    }
+
+    pub fn print(&self) {
+        println!("{}", self.to_tabled_table().with(Style::sharp()));
     }
 }
