@@ -1,17 +1,14 @@
+mod client;
 mod tables;
 
-use std::{collections::HashMap, error::Error, fs::File};
+use std::{collections::HashMap, error::Error};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use elasticsearch::{
-    http::transport::Transport,
-    indices::{IndicesCreateParts, IndicesDeleteParts, IndicesGetParts},
-    params::Refresh,
-    BulkOperation, BulkParts, Elasticsearch, SearchParts,
-};
-use serde::Deserialize;
-use serde_json::{json, Value};
-use tables::Table;
+use serde_json::Value;
+use tabled::settings::Style;
+
+use client::{Es, EsBulkSummary, EsInfo, EsSearchResult};
+use tables::TabularData;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -64,183 +61,16 @@ enum Commands {
     Search {
         #[arg(help = "Name of the index to search")]
         index: String,
+        #[arg(help = "Lucene search query")]
+        query: Option<String>,
+        #[arg(short = 'l', long = "limit")]
+        #[arg(help = "Maximum number of search hits to return")]
+        size: Option<u16>,
         #[arg(short = 'f', long = "format")]
         #[arg(help = "Output format for search results")]
-        #[arg(default_value_t = SearchResultFormat::Raw, value_enum)]
+        #[arg(default_value_t = SearchResultFormat::Table, value_enum)]
         format: SearchResultFormat,
-        #[arg(short = 's', long = "size")]
-        #[arg(help = "Number of search hits to return")]
-        size: Option<u16>,
     },
-}
-
-struct Es<'a> {
-    elasticsearch: &'a Elasticsearch,
-}
-
-#[derive(Deserialize)]
-struct EsInfo {
-    name: String,
-    cluster_name: String,
-    version: EsInfoVersion,
-    tagline: String,
-}
-
-#[derive(Deserialize)]
-struct EsInfoVersion {
-    number: String,
-}
-
-#[derive(Deserialize)]
-struct EsCreated {
-    acknowledged: bool,
-    index: String,
-}
-
-#[derive(Deserialize)]
-struct EsDeleted {
-    acknowledged: bool,
-}
-
-#[derive(Deserialize)]
-struct EsBulkSummary {
-    items: Vec<HashMap<String, EsBulkSummaryAction>>,
-}
-
-#[derive(Deserialize)]
-struct EsBulkSummaryAction {
-    _index: String,
-    _id: String,
-    _version: i32,
-    result: String,
-    _seq_no: i32,
-}
-
-#[derive(Deserialize)]
-struct EsSearchResult {
-    hits: EsSearchResultHits,
-}
-
-#[derive(Deserialize)]
-struct EsSearchResultHits {
-    hits: Vec<EsSearchResultHitsHit>,
-}
-
-#[derive(Deserialize, Debug)]
-struct EsSearchResultHitsHit {
-    _index: String,
-    _id: String,
-    _score: f64,
-    _source: HashMap<String, Value>,
-}
-
-impl Es<'_> {
-    pub async fn info(&self) -> Result<EsInfo, Box<dyn Error>> {
-        let response = self.elasticsearch.info().send().await?;
-        Ok(response.json::<EsInfo>().await?)
-    }
-
-    pub async fn get_index_list(
-        &self,
-        patterns: &[&str],
-    ) -> Result<HashMap<String, Value>, Box<dyn Error>> {
-        let response = self
-            .elasticsearch
-            .indices()
-            .get(IndicesGetParts::Index(patterns))
-            .send()
-            .await?;
-        Ok(response.json::<HashMap<String, Value>>().await?)
-    }
-
-    async fn create_index(
-        &self,
-        index: &str,
-        mappings: &Vec<String>,
-    ) -> Result<EsCreated, Box<dyn Error>> {
-        let mut body = json!({
-            "mappings": {
-                "properties": {
-                }
-            }
-        });
-        for mapping in mappings.iter() {
-            let bits: Vec<&str> = mapping.split(":").collect();
-            body["mappings"]["properties"][bits[0]] = json!({"type": bits[1]});
-        }
-        let response = self
-            .elasticsearch
-            .indices()
-            .create(IndicesCreateParts::Index(index))
-            .body(body)
-            .send()
-            .await?;
-        Ok(response.json::<EsCreated>().await?)
-    }
-
-    async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn Error>> {
-        let response = self
-            .elasticsearch
-            .indices()
-            .delete(IndicesDeleteParts::Index(&[index]))
-            .send()
-            .await?;
-        Ok(response.json::<EsDeleted>().await?)
-    }
-
-    async fn load(
-        &self,
-        index: &str,
-        csv_filenames: &Vec<String>,
-    ) -> Result<EsBulkSummary, Box<dyn Error>> {
-        type Document = HashMap<String, Value>;
-        let mut documents: Vec<Document> = Vec::new();
-        for filename in csv_filenames.iter() {
-            let file = File::open(filename)?;
-            let mut reader = csv::Reader::from_reader(file);
-            for result in reader.deserialize() {
-                let document: Document = result?;
-                documents.push(document);
-            }
-        }
-        let mut body: Vec<BulkOperation<_>> = vec![];
-        for document in documents.iter() {
-            body.push(BulkOperation::index(json!(document)).into());
-        }
-        let response = self
-            .elasticsearch
-            .bulk(BulkParts::Index(index))
-            .body(body)
-            .refresh(Refresh::WaitFor)
-            .send()
-            .await?;
-        Ok(response.json::<EsBulkSummary>().await?)
-    }
-
-    async fn search(
-        &self,
-        index: &str,
-        size: &Option<u16>,
-    ) -> Result<EsSearchResult, Box<dyn Error>> {
-        let mut body = json!({
-            "query": {
-                "match_all": {}
-            }
-        });
-        match size {
-            Some(x) => {
-                body["size"] = json!(x);
-            }
-            _ => {}
-        }
-        let response = self
-            .elasticsearch
-            .search(SearchParts::Index(&[index]))
-            .body(body)
-            .send()
-            .await?;
-        Ok(response.json::<EsSearchResult>().await?)
-    }
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
@@ -253,10 +83,7 @@ enum SearchResultFormat {
 async fn main() -> Result<(), Box<dyn Error>> {
     let uri = "http://elastic:nmd6NZXM@localhost:9200";
     let args = CommandLine::parse();
-    let transport = Transport::single_node(uri)?;
-    let es = Es {
-        elasticsearch: &Elasticsearch::new(transport),
-    };
+    let es = Es::new(uri);
     match &args.command {
         Commands::Info {} => {
             print_info(&es.info().await?);
@@ -288,10 +115,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Commands::Search {
             index,
-            format,
+            query,
             size,
+            format,
         } => {
-            let result = &es.search(index, size).await?;
+            let result = &es.search(index, query, size).await?;
             print_search_result(result, format);
         }
     }
@@ -328,16 +156,16 @@ fn print_bulk_summary(summary: &EsBulkSummary) {
 fn print_search_result(result: &EsSearchResult, format: &SearchResultFormat) {
     match format {
         SearchResultFormat::Raw => {
-            for record in result.hits.hits.iter() {
-                println!("{:?}", record);
+            for hit in result.hits.hits.iter() {
+                println!("{:?}", hit);
             }
         }
         SearchResultFormat::Table => {
-            let mut table = Table::new();
+            let mut data = TabularData::new();
             for hit in result.hits.hits.iter() {
-                table.push_row(&hit._source);
+                data.push_row(&hit._source);
             }
-            table.print();
+            println!("{}", data.to_table().with(Style::sharp()));
         }
     }
 }

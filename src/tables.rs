@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use ascii_table::AsciiTable;
 use serde_json::{json, Value};
+use tabled::builder::Builder;
 
-pub struct Table {
+pub struct TabularData {
     column_names: Vec<String>,
-    rows: Vec<HashMap<String, Value>>,
+    rows: Vec<Vec<String>>,
 }
 
-impl Table {
+impl TabularData {
     pub fn new() -> Self {
         Self {
             column_names: vec![],
@@ -22,30 +22,27 @@ impl Table {
                 self.column_names.push(key.to_owned());
             }
         }
-        self.rows.push(row.to_owned());
-    }
-
-    pub fn print(&self) {
-        let mut table = AsciiTable::default();
-        for (i, name) in self.column_names.iter().enumerate() {
-            table.column(i).set_header(name);
-        }
-        let mut data: Vec<Vec<String>> = vec![];
-        for row in self.rows.iter() {
-            let mut row_data: Vec<String> = vec![];
-            for column_name in self.column_names.iter() {
-                let value = row.get(column_name).unwrap_or_else(|| &json!(null));
-                match value {
-                    Value::String(string_value) => {
-                        row_data.push(string_value.to_string());
-                    }
-                    _ => {
-                        row_data.push(value.to_string());
-                    }
+        let mut string_values: Vec<String> = vec![];
+        for column_name in self.column_names.iter() {
+            let value = row.get(column_name).unwrap_or_else(|| &json!(null));
+            match value {
+                Value::String(string_value) => {
+                    string_values.push(string_value.to_string());
+                }
+                _ => {
+                    string_values.push(value.to_string());
                 }
             }
-            data.push(row_data);
         }
-        table.print(data);
+        self.rows.push(string_values);
+    }
+
+    pub fn to_table(&self) -> tabled::Table {
+        let mut builder = Builder::default();
+        builder.push_record(self.column_names.clone());
+        for row in self.rows.iter() {
+            builder.push_record(row)
+        }
+        builder.build()
     }
 }
