@@ -17,7 +17,7 @@ impl TabularData {
     }
 
     pub fn push_row(&mut self, row: &HashMap<String, Value>) {
-        for (key, _value) in row.into_iter() {
+        for (key, _value) in row.iter() {
             if !self.column_names.contains(key) {
                 self.column_names.push(key.to_owned());
             }

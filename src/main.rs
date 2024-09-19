@@ -138,8 +138,8 @@ fn print_info(info: &EsInfo) {
 }
 
 fn print_index_list(index_list: &HashMap<String, Value>, all: &bool) {
-    for (key, _value) in index_list.into_iter() {
-        if *all || !key.starts_with(".") {
+    for (key, _value) in index_list.iter() {
+        if *all || !key.starts_with('.') {
             println!("{} {}", key, _value);
         }
     }
@@ -148,7 +148,7 @@ fn print_index_list(index_list: &HashMap<String, Value>, all: &bool) {
 fn print_bulk_summary(summary: &EsBulkSummary) {
     let mut results: HashMap<String, usize> = HashMap::new();
     for item in summary.items.iter() {
-        for (_key, value) in item.into_iter() {
+        for (_key, value) in item.iter() {
             *results.entry(value.result.to_string()).or_insert(0) += 1;
         }
     }

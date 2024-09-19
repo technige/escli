@@ -98,7 +98,7 @@ impl Es {
     pub async fn create_index(
         &self,
         index: &str,
-        mappings: &Vec<String>,
+        mappings: &[String],
     ) -> Result<EsCreated, Box<dyn Error>> {
         let mut body = json!({
             "mappings": {
@@ -107,7 +107,7 @@ impl Es {
             }
         });
         for mapping in mappings.iter() {
-            let bits: Vec<&str> = mapping.split(":").collect();
+            let bits: Vec<&str> = mapping.split(':').collect();
             body["mappings"]["properties"][bits[0]] = json!({"type": bits[1]});
         }
         let response = self
@@ -133,7 +133,7 @@ impl Es {
     pub async fn load(
         &self,
         index: &str,
-        csv_filenames: &Vec<String>,
+        csv_filenames: &[String],
     ) -> Result<EsBulkSummary, Box<dyn Error>> {
         type Document = HashMap<String, Value>;
         let mut documents: Vec<Document> = Vec::new();
@@ -174,18 +174,12 @@ impl Es {
             Some(x) => request = request.q(x),
             _ => body["query"] = json!({"match_all": {}}),
         }
-        match order_by {
-            Some(x) => {
-                order_by_pairs.push(x.as_str());
-                request = request.sort(order_by_pairs.as_slice())
-            }
-            _ => {}
+        if let Some(x) = order_by {
+            order_by_pairs.push(x.as_str());
+            request = request.sort(order_by_pairs.as_slice())
         }
-        match limit {
-            Some(x) => {
-                body["size"] = json!(x);
-            }
-            _ => {}
+        if let Some(x) = limit {
+            body["size"] = json!(x);
         }
         let response = request.body(body).send().await?;
         Ok(response.json::<EsSearchResult>().await?)
