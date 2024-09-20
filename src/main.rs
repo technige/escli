@@ -104,10 +104,11 @@ enum SearchResultFormat {
 async fn main() -> Result<(), Box<dyn Error>> {
     // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
-    match env::var("ESCLI_ADDR") {
+    match env::var("ESCLI_URL") {
         // "http://localhost:9200"
-        Ok(addr) => {
-            let url = Url::parse(addr.as_str()).expect("Failed to parse URI");
+        Ok(url) => {
+            let url =
+                Url::parse(url.as_str()).expect(format!("Failed to parse URL: {url}").as_str());
             let auth;
             match env::var("ESCLI_API_KEY") {
                 Ok(api_key) => {
@@ -131,7 +132,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         Err(_) => {
-            eprintln!("The ESCLI_ADDR environment variable is not set. Please set this with the address of an Elasticsearch service.");
+            eprintln!("The ESCLI_URL environment variable is not set. Please set this with the URL of an Elasticsearch service.");
             exit(1);
         }
     }
