@@ -1,9 +1,17 @@
 mod client;
 mod viz;
 
-use std::{collections::HashMap, error::Error};
+use std::{
+    collections::HashMap,
+    env,
+    error::Error,
+    process::exit,
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 use clap::{Parser, Subcommand, ValueEnum};
+use elasticsearch::{auth::Credentials, http::Url};
 use serde_json::Value;
 
 use client::{Es, EsBulkSummary, EsInfo, EsSearchResult};
@@ -19,6 +27,17 @@ struct CommandLine {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Ping a HEAD request to the service root to check availability")]
+    Ping {
+        #[arg(short = 'c', long = "count")]
+        #[arg(help = "Stop after sending COUNT requests")]
+        count: Option<usize>,
+        #[arg(short = 'i', long = "interval")]
+        #[arg(help = "Time to wait in seconds between requests (default 1s)")]
+        #[arg(default_value_t = 1.0)]
+        interval: f64,
+    },
+
     #[command(about = "Show information about the Elasticsearch service")]
     Info {},
 
@@ -83,10 +102,65 @@ enum SearchResultFormat {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let uri = "http://elastic:nmd6NZXM@localhost:9200";
+    // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
-    let es = Es::new(uri);
-    match &args.command {
+    match env::var("ESCLI_ADDR") {
+        // "http://localhost:9200"
+        Ok(addr) => {
+            let url = Url::parse(addr.as_str()).expect("Failed to parse URI");
+            let auth;
+            match env::var("ESCLI_API_KEY") {
+                Ok(api_key) => {
+                    auth = Credentials::EncodedApiKey(api_key);
+                }
+                Err(_) => match env::var("ESCLI_PASSWORD") {
+                    Ok(password) => {
+                        auth = Credentials::Basic(
+                            env::var("ESCLI_USER").unwrap_or(String::from("elastic")),
+                            password,
+                        );
+                    }
+                    Err(_) => {
+                        eprintln!("Please set Elasticsearch credentials with either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD");
+                        exit(1);
+                    }
+                },
+            }
+            let es = Es::new(url, auth);
+            despatch(&args.command, &es).await?;
+            Ok(())
+        }
+        Err(_) => {
+            eprintln!("The ESCLI_ADDR environment variable is not set. Please set this with the address of an Elasticsearch service.");
+            exit(1);
+        }
+    }
+}
+
+async fn despatch(command: &Commands, es: &Es) -> Result<(), Box<dyn Error>> {
+    match command {
+        Commands::Ping { count, interval } => {
+            println!("HEAD {}", es.url());
+            let mut seq: usize = 0;
+            loop {
+                seq += 1;
+                let t0 = SystemTime::now();
+                let result = es.ping().await;
+                let elapsed = t0.elapsed().expect("System time error");
+                match result {
+                    Ok(status_code) => {
+                        println!("{status_code}: seq={seq} time={elapsed:?}");
+                    }
+                    Err(e) => {
+                        println!("{e}: seq={seq} time={elapsed:?}");
+                    }
+                }
+                if count.is_some_and(|x| seq >= x) {
+                    break;
+                }
+                sleep(Duration::from_secs_f64(*interval));
+            }
+        }
         Commands::Info {} => {
             print_info(&es.info().await?);
         }

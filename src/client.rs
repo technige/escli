@@ -1,7 +1,11 @@
 use std::{collections::HashMap, error::Error, fs::File};
 
 use elasticsearch::{
-    http::transport::Transport,
+    auth::Credentials,
+    http::{
+        transport::{SingleNodeConnectionPool, TransportBuilder},
+        StatusCode, Url,
+    },
     indices::{IndicesCreateParts, IndicesDeleteParts, IndicesGetParts},
     params::Refresh,
     BulkOperation, BulkParts, Elasticsearch, SearchParts,
@@ -10,6 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 pub struct Es {
+    url: Url,
     elasticsearch: Elasticsearch,
 }
 
@@ -70,11 +75,25 @@ pub struct EsSearchResultHitsHit {
 }
 
 impl Es {
-    pub fn new(uri: &str) -> Self {
-        let transport = Transport::single_node(uri).expect("Failed to create transport");
+    pub fn new(url: Url, auth: Credentials) -> Self {
         Self {
-            elasticsearch: Elasticsearch::new(transport),
+            url: url.clone(),
+            elasticsearch: Elasticsearch::new(
+                TransportBuilder::new(SingleNodeConnectionPool::new(url))
+                    .auth(auth)
+                    .build()
+                    .expect("Failed to create transport"),
+            ),
         }
+    }
+
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
+    pub async fn ping(&self) -> Result<StatusCode, Box<dyn Error>> {
+        let response = self.elasticsearch.ping().send().await?;
+        Ok(response.status_code())
     }
 
     pub async fn info(&self) -> Result<EsInfo, Box<dyn Error>> {
