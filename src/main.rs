@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             let es = Es::new(url, auth);
             despatch(&args.command, &es).await?;
-            Ok(())
+            exit(0)
         }
         Err(_) => {
             eprintln!("The ESCLI_URL environment variable is not set. Please set this with the URL of an Elasticsearch service.");
@@ -207,7 +207,23 @@ async fn despatch(command: &Commands, es: &Es) -> Result<(), Box<dyn Error>> {
 fn print_info(info: &EsInfo) {
     println!("Name: {}", info.name);
     println!("Cluster Name: {}", info.cluster_name);
-    println!("Version: {}", info.version.number);
+    println!("Cluster UUID: {}", info.cluster_uuid);
+    println!("Version:");
+    println!("  Number: {}", info.version.number);
+    println!("  Build Flavor: {}", info.version.build_flavor);
+    println!("  Build Type: {}", info.version.build_type);
+    println!("  Build Hash: {}", info.version.build_hash);
+    println!("  Build Date: {}", info.version.build_date);
+    println!("  Build Snapshot: {}", info.version.build_snapshot);
+    println!("  Lucene Version: {}", info.version.lucene_version);
+    println!(
+        "  Minimum Wire Compatibility Version: {}",
+        info.version.minimum_wire_compatibility_version
+    );
+    println!(
+        "  Minimum Index Compatibility Version: {}",
+        info.version.minimum_index_compatibility_version
+    );
     println!("Tagline: {}", info.tagline);
 }
 

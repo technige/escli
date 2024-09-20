@@ -22,6 +22,7 @@ pub struct Es {
 pub struct EsInfo {
     pub name: String,
     pub cluster_name: String,
+    pub cluster_uuid: String,
     pub version: EsInfoVersion,
     pub tagline: String,
 }
@@ -29,6 +30,14 @@ pub struct EsInfo {
 #[derive(Deserialize)]
 pub struct EsInfoVersion {
     pub number: String,
+    pub build_flavor: String,
+    pub build_type: String,
+    pub build_hash: String,
+    pub build_date: String,
+    pub build_snapshot: bool,
+    pub lucene_version: String,
+    pub minimum_wire_compatibility_version: String,
+    pub minimum_index_compatibility_version: String,
 }
 
 #[derive(Deserialize)]

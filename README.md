@@ -73,8 +73,8 @@ This can be used as an alternative to API key auth (above).
 
 ## Checking connectivity with `ping`
 
-The `escli` tool provides a `ping` subcommand to check server connectivity.
-This operates in a similar way to the standard command line `ping` utility.
+Escli provides a `ping` command to check server connectivity.
+This operates in a similar way to the standard command line `ping` utility, but instead sends an HTTP `HEAD` request to the service root.
 
 ```bash
 $ escli ping --count 4`
@@ -83,4 +83,27 @@ HEAD http://localhost:9200/
 200 OK: seq=2 time=3.250639ms
 200 OK: seq=3 time=1.017053ms
 200 OK: seq=4 time=2.836599ms
+```
+
+
+## Fetching Elasticsearch system details with `info`
+
+The `info` command queries the backend service to gather naming and version information.
+
+```bash
+$ escli info`
+Name: d36e2bed1b74
+Cluster Name: docker-cluster
+Cluster UUID: IYeaY0mcQ5mGWBEzJoWDgA
+Version:
+  Number: 8.15.1
+  Build Flavor: default
+  Build Type: docker
+  Build Hash: 253e8544a65ad44581194068936f2a5d57c2c051
+  Build Date: 2024-09-02T22:04:47.310170297Z
+  Build Snapshot: false
+  Lucene Version: 9.11.1
+  Minimum Wire Compatibility Version: 7.17.0
+  Minimum Index Compatibility Version: 7.0.0
+Tagline: You Know, for Search
 ```
