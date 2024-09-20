@@ -107,3 +107,27 @@ Version:
   Minimum Index Compatibility Version: 7.0.0
 Tagline: You Know, for Search
 ```
+
+
+## Index Management with `mk`, `ls` and `rm`
+
+Indexes can be created, listed, and deleted using the `mk`, `ls`, and `rm` commands respectively.
+
+To create a new index for storing documents, use `mk` and supply the index name and field mappings (with a sequence of `-m` or `--mapping` options).
+
+```bash
+$ escli mk bowie -m title:text -m uk.chart.debut:date -m uk.chart.pos:integer
+```
+
+The full list of indexes can be seen with the `ls` command.
+
+```bash
+$ escli ls
+bowie
+```
+
+An index can be removed with `rm`.
+
+```bash
+$ escli rm bowie
+```

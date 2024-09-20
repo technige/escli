@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     env,
     error::Error,
-    process::exit,
+    process::{exit, ExitCode},
     thread::sleep,
     time::{Duration, SystemTime},
 };
@@ -101,7 +101,7 @@ enum SearchResultFormat {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<ExitCode, Box<dyn Error>> {
     // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
     match env::var("ESCLI_URL") {
@@ -128,8 +128,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 },
             }
             let es = Es::new(url, auth);
-            despatch(&args.command, &es).await?;
-            exit(0)
+            match despatch(&args.command, &es).await {
+                Ok(_) => Ok(ExitCode::SUCCESS),
+                Err(_) => Ok(ExitCode::FAILURE),
+            }
         }
         Err(_) => {
             eprintln!("The ESCLI_URL environment variable is not set. Please set this with the URL of an Elasticsearch service.");
@@ -169,12 +171,19 @@ async fn despatch(command: &Commands, es: &Es) -> Result<(), Box<dyn Error>> {
             print_index_list(&es.get_index_list(&["*"]).await?, all);
         }
         Commands::CreateIndex { index, mappings } => {
-            let created = &es.create_index(index, mappings).await?;
-            println!(
-                "Created index {} ({}acknowledged)",
-                created.index,
-                if created.acknowledged { "" } else { "not " }
-            );
+            match &es.create_index(index, mappings).await {
+                Ok(created) => {
+                    println!(
+                        "Created index {} ({}acknowledged)",
+                        created.index,
+                        if created.acknowledged { "" } else { "not " }
+                    );
+                }
+                Err(error) => {
+                    eprintln!("{:?}", error);
+                    exit(1);
+                }
+            }
         }
         Commands::DeleteIndex { index } => {
             let deleted = &es.delete_index(index).await?;
@@ -228,6 +237,7 @@ fn print_info(info: &EsInfo) {
 }
 
 fn print_index_list(index_list: &HashMap<String, Value>, all: &bool) {
+    // TODO: tabulate
     for (key, _value) in index_list.iter() {
         if *all || !key.starts_with('.') {
             println!("{} {}", key, _value);

@@ -138,14 +138,20 @@ impl Es {
             let bits: Vec<&str> = mapping.split(':').collect();
             body["mappings"]["properties"][bits[0]] = json!({"type": bits[1]});
         }
-        let response = self
+        match self
             .elasticsearch
             .indices()
             .create(IndicesCreateParts::Index(index))
             .body(body)
             .send()
-            .await?;
-        Ok(response.json::<EsCreated>().await?)
+            .await
+        {
+            Ok(response) => match response.status_code().as_u16() {
+                200 => Ok(response.json::<EsCreated>().await?),
+                _ => Ok(response.json::<EsCreated>().await?),
+            },
+            Err(error) => Err(Box::from(error)),
+        }
     }
 
     pub async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn Error>> {
