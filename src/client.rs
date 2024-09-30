@@ -13,7 +13,7 @@ use elasticsearch::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-pub struct Es {
+pub struct SimpleClient {
     url: Url,
     elasticsearch: Elasticsearch,
 }
@@ -127,7 +127,9 @@ pub struct EsSearchResultHitsHit {
     pub _source: HashMap<String, Value>,
 }
 
-impl Es {
+impl SimpleClient {
+    /// Creates a new client with the given URL and credentials.
+    ///
     pub fn new(url: Url, auth: Credentials) -> Self {
         Self {
             url: url.clone(),
@@ -140,6 +142,18 @@ impl Es {
         }
     }
 
+    /// Creates a new client by reading configuration values from environment
+    /// variables.
+    ///
+    /// - `ESCLI_URL` - URL of Elasticsearch service (e.g. `http://localhost:9200`)
+    /// - `ESCLI_USER` - user name for authentication (default `elastic`)
+    /// - `ESCLI_PASSWORD` - password for authentication
+    /// - `ESCLI_API_KEY` - API key for authentication
+    ///
+    /// A URL is required, but it is not necessary to provide values for all
+    /// authentication variables. Either `ESCLI_USER`/`ESCLI_PASSWORD` or
+    /// `ESCLI_API_KEY` may be supplied.
+    ///
     pub fn from_env_vars() -> Result<Self, Error> {
         match env::var("ESCLI_URL") {
             Ok(url) => match Url::parse(url.as_str()) {

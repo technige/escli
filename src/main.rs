@@ -12,7 +12,7 @@ use std::{
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::Value;
 
-use client::{Es, EsBulkSummary, EsInfo, EsSearchResult};
+use client::{EsBulkSummary, EsInfo, EsSearchResult, SimpleClient};
 use viz::DataTable;
 
 #[derive(Parser)]
@@ -102,7 +102,7 @@ enum SearchResultFormat {
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
     // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
-    match Es::from_env_vars() {
+    match SimpleClient::from_env_vars() {
         Ok(es) => match despatch(&args.command, &es).await {
             Ok(_) => Ok(ExitCode::SUCCESS),
             Err(_) => Ok(ExitCode::FAILURE),
@@ -114,7 +114,7 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
     }
 }
 
-async fn despatch(command: &Commands, es: &Es) -> Result<(), Box<dyn Error>> {
+async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn Error>> {
     match command {
         Commands::Ping { count, interval } => {
             println!("HEAD {}", es.url());
