@@ -100,7 +100,6 @@ enum SearchResultFormat {
 
 #[tokio::main]
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
-    // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
     match SimpleClient::default() {
         Ok(es) => match despatch(&args.command, &es).await {
