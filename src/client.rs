@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt::Display, fs::File};
+use std::{collections::HashMap, env, fmt::Display, fs::File};
 
 use elasticsearch::{
     auth::Credentials,
@@ -19,26 +19,45 @@ pub struct Es {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct EsError {
-    pub error: EsErrorDetail,
+pub struct Error {
+    pub error: ErrorDetail,
     pub status: u16,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct EsErrorDetail {
+pub struct ErrorDetail {
     #[serde(rename = "type")]
-    pub error_type: String,
+    pub type_code: String,
     pub reason: Option<String>,
-    pub root_cause: Option<Vec<EsErrorDetail>>,
+    pub root_cause: Option<Vec<ErrorDetail>>,
 }
 
-impl Error for EsError {}
+impl Error {
+    pub fn new(reason: String, type_code: Option<String>) -> Self {
+        Error {
+            error: ErrorDetail::new(reason, type_code),
+            status: 0,
+        }
+    }
+}
 
-impl Display for EsError {
+impl ErrorDetail {
+    pub fn new(reason: String, type_code: Option<String>) -> Self {
+        ErrorDetail {
+            type_code: type_code.unwrap_or(String::new()),
+            reason: Some(reason),
+            root_cause: None,
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.error.reason {
             Some(ref text) => write!(f, "Error: {}", text),
-            _ => write!(f, "Error: {}", self.error.error_type),
+            _ => write!(f, "Error: {}", self.error.type_code),
         }
     }
 }
@@ -121,16 +140,55 @@ impl Es {
         }
     }
 
+    pub fn from_env_vars() -> Result<Self, Error> {
+        match env::var("ESCLI_URL") {
+            Ok(url) => match Url::parse(url.as_str()) {
+                Ok(url) => {
+                    let auth;
+                    match env::var("ESCLI_API_KEY") {
+                        Ok(api_key) => {
+                            auth = Credentials::EncodedApiKey(api_key);
+                        }
+                        Err(_) => match env::var("ESCLI_PASSWORD") {
+                            Ok(password) => {
+                                auth = Credentials::Basic(
+                                    env::var("ESCLI_USER").unwrap_or(String::from("elastic")),
+                                    password,
+                                );
+                            }
+                            Err(e) => {
+                                return Err(Error::new(
+                                        format!("failed to load Elasticsearch credentials from either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD ({e})"),
+                                        None,
+                                    ));
+                            }
+                        },
+                    }
+                    return Ok(Self::new(url, auth));
+                }
+                Err(e) => {
+                    return Err(Error::new(format!("failed to parse ESCLI_URL ({e})"), None));
+                }
+            },
+            Err(e) => {
+                return Err(Error::new(
+                    format!("failed to load Elasticsearch URL from ESCLI_URL ({e})"),
+                    None,
+                ));
+            }
+        }
+    }
+
     pub fn url(&self) -> &Url {
         &self.url
     }
 
-    pub async fn ping(&self) -> Result<StatusCode, Box<dyn Error>> {
+    pub async fn ping(&self) -> Result<StatusCode, Box<dyn std::error::Error>> {
         let response = self.elasticsearch.ping().send().await?;
         Ok(response.status_code())
     }
 
-    pub async fn info(&self) -> Result<EsInfo, Box<dyn Error>> {
+    pub async fn info(&self) -> Result<EsInfo, Box<dyn std::error::Error>> {
         let response = self.elasticsearch.info().send().await?;
         Ok(response.json::<EsInfo>().await?)
     }
@@ -138,7 +196,7 @@ impl Es {
     pub async fn get_index_list(
         &self,
         patterns: &[&str],
-    ) -> Result<HashMap<String, Value>, Box<dyn Error>> {
+    ) -> Result<HashMap<String, Value>, Box<dyn std::error::Error>> {
         let response = self
             .elasticsearch
             .indices()
@@ -152,7 +210,7 @@ impl Es {
         &self,
         index: &str,
         mappings: &[String],
-    ) -> Result<EsCreated, Box<dyn Error>> {
+    ) -> Result<EsCreated, Box<dyn std::error::Error>> {
         let mut body = json!({
             "mappings": {
                 "properties": {
@@ -173,13 +231,13 @@ impl Es {
         {
             Ok(response) => match response.status_code().as_u16() {
                 200..=299 => Ok(response.json::<EsCreated>().await?),
-                _ => Err(Box::from(response.json::<EsError>().await?)),
+                _ => Err(Box::from(response.json::<Error>().await?)),
             },
             Err(error) => Err(Box::from(error)),
         }
     }
 
-    pub async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn Error>> {
+    pub async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn std::error::Error>> {
         match self
             .elasticsearch
             .indices()
@@ -189,7 +247,7 @@ impl Es {
         {
             Ok(response) => match response.status_code().as_u16() {
                 200..=299 => Ok(response.json::<EsDeleted>().await?),
-                _ => Err(Box::from(response.json::<EsError>().await?)),
+                _ => Err(Box::from(response.json::<Error>().await?)),
             },
             Err(error) => Err(Box::from(error)),
         }
@@ -199,7 +257,7 @@ impl Es {
         &self,
         index: &str,
         csv_filenames: &[String],
-    ) -> Result<EsBulkSummary, Box<dyn Error>> {
+    ) -> Result<EsBulkSummary, Box<dyn std::error::Error>> {
         type Document = HashMap<String, Value>;
         let mut documents: Vec<Document> = Vec::new();
         for filename in csv_filenames.iter() {
@@ -230,7 +288,7 @@ impl Es {
         query: &Option<String>,
         order_by: &Option<String>,
         limit: &Option<u16>,
-    ) -> Result<EsSearchResult, Box<dyn Error>> {
+    ) -> Result<EsSearchResult, Box<dyn std::error::Error>> {
         let target = &[index];
         let mut request = self.elasticsearch.search(SearchParts::Index(target));
         let mut order_by_pairs = Vec::new();

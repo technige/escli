@@ -3,7 +3,6 @@ mod viz;
 
 use std::{
     collections::HashMap,
-    env,
     error::Error,
     process::{exit, ExitCode},
     thread::sleep,
@@ -11,7 +10,6 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum};
-use elasticsearch::{auth::Credentials, http::Url};
 use serde_json::Value;
 
 use client::{Es, EsBulkSummary, EsInfo, EsSearchResult};
@@ -104,37 +102,13 @@ enum SearchResultFormat {
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
     // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
-    match env::var("ESCLI_URL") {
-        // "http://localhost:9200"
-        Ok(url) => {
-            let url =
-                Url::parse(url.as_str()).expect(format!("Failed to parse URL: {url}").as_str());
-            let auth;
-            match env::var("ESCLI_API_KEY") {
-                Ok(api_key) => {
-                    auth = Credentials::EncodedApiKey(api_key);
-                }
-                Err(_) => match env::var("ESCLI_PASSWORD") {
-                    Ok(password) => {
-                        auth = Credentials::Basic(
-                            env::var("ESCLI_USER").unwrap_or(String::from("elastic")),
-                            password,
-                        );
-                    }
-                    Err(_) => {
-                        eprintln!("Please set Elasticsearch credentials with either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD");
-                        exit(1);
-                    }
-                },
-            }
-            let es = Es::new(url, auth);
-            match despatch(&args.command, &es).await {
-                Ok(_) => Ok(ExitCode::SUCCESS),
-                Err(_) => Ok(ExitCode::FAILURE),
-            }
-        }
-        Err(_) => {
-            eprintln!("The ESCLI_URL environment variable is not set. Please set this with the URL of an Elasticsearch service.");
+    match Es::from_env_vars() {
+        Ok(es) => match despatch(&args.command, &es).await {
+            Ok(_) => Ok(ExitCode::SUCCESS),
+            Err(_) => Ok(ExitCode::FAILURE),
+        },
+        Err(e) => {
+            eprintln!("{}", e);
             exit(1);
         }
     }
