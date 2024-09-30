@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use tabled::{builder::Builder, settings::Style};
 
-pub struct DataTable {
+pub struct Table {
     column_names: Vec<String>,
     rows: Vec<Vec<String>>,
 }
 
-impl DataTable {
+impl Table {
     pub fn new() -> Self {
         Self {
             column_names: vec![],
@@ -35,6 +35,10 @@ impl DataTable {
             }
         }
         self.rows.push(string_values);
+    }
+
+    pub fn count_rows(&self) -> usize {
+        self.rows.len()
     }
 
     fn to_tabled_table(&self) -> tabled::Table {

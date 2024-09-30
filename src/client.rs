@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     env,
-    fmt::Display,
     fs::{read_to_string, File},
     path::Path,
 };
@@ -22,115 +21,6 @@ use serde_json::{json, Value};
 pub struct SimpleClient {
     url: Url,
     elasticsearch: Elasticsearch,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Error {
-    pub error: ErrorDetail,
-    pub status: u16,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ErrorDetail {
-    #[serde(rename = "type")]
-    pub type_code: String,
-    pub reason: Option<String>,
-    pub root_cause: Option<Vec<ErrorDetail>>,
-}
-
-impl Error {
-    pub fn new(reason: String, type_code: Option<String>) -> Self {
-        Error {
-            error: ErrorDetail::new(reason, type_code),
-            status: 0,
-        }
-    }
-}
-
-impl ErrorDetail {
-    pub fn new(reason: String, type_code: Option<String>) -> Self {
-        ErrorDetail {
-            type_code: type_code.unwrap_or(String::new()),
-            reason: Some(reason),
-            root_cause: None,
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.error.reason {
-            Some(ref text) => write!(f, "Error: {}", text),
-            _ => write!(f, "Error: {}", self.error.type_code),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub struct EsInfo {
-    pub name: String,
-    pub cluster_name: String,
-    pub cluster_uuid: String,
-    pub version: EsInfoVersion,
-    pub tagline: String,
-}
-
-#[derive(Deserialize)]
-pub struct EsInfoVersion {
-    pub number: String,
-    pub build_flavor: String,
-    pub build_type: String,
-    pub build_hash: String,
-    pub build_date: String,
-    pub build_snapshot: bool,
-    pub lucene_version: String,
-    pub minimum_wire_compatibility_version: String,
-    pub minimum_index_compatibility_version: String,
-}
-
-#[derive(Deserialize)]
-pub struct EsCreated {
-    pub acknowledged: bool,
-    pub index: String,
-}
-
-#[derive(Deserialize)]
-pub struct EsDeleted {
-    pub acknowledged: bool,
-}
-
-#[derive(Deserialize)]
-pub struct EsBulkSummary {
-    pub items: Vec<HashMap<String, EsBulkSummaryAction>>,
-}
-
-#[derive(Deserialize)]
-pub struct EsBulkSummaryAction {
-    pub _index: String,
-    pub _id: String,
-    pub _version: i32,
-    pub result: String,
-    pub _seq_no: i32,
-}
-
-#[derive(Deserialize)]
-pub struct EsSearchResult {
-    pub hits: EsSearchResultHits,
-}
-
-#[derive(Deserialize)]
-pub struct EsSearchResultHits {
-    pub hits: Vec<EsSearchResultHitsHit>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct EsSearchResultHitsHit {
-    pub _index: String,
-    pub _id: String,
-    pub _score: Option<f64>,
-    pub _source: HashMap<String, Value>,
 }
 
 impl SimpleClient {
@@ -167,10 +57,7 @@ impl SimpleClient {
                     Err(_) => match Self::for_start_local(Path::new("elastic-start-local")) {
                         Ok(client) => Ok(client),
                         Err(_) => {
-                            Err(Error::new(
-                                format!("failed to initialise client from either environment variables or start-local .env file"),
-                                None,
-                            ))
+                            Err(Error::new(format!("failed to initialise client from either environment variables or start-local .env file")))
                         }
                     },
                 }
@@ -207,24 +94,22 @@ impl SimpleClient {
                                 );
                             }
                             Err(e) => {
-                                return Err(Error::new(
-                                        format!("failed to load Elasticsearch credentials from either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD ({e})"),
-                                        None,
-                                    ));
+                                return Err(Error::new(format!(
+                                    "failed to load Elasticsearch credentials from either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD ({e})"
+                                )));
                             }
                         },
                     }
                     return Ok(Self::new(url, auth));
                 }
                 Err(e) => {
-                    return Err(Error::new(format!("failed to parse ESCLI_URL ({e})"), None));
+                    return Err(Error::new(format!("failed to parse ESCLI_URL ({e})")));
                 }
             },
             Err(e) => {
-                return Err(Error::new(
-                    format!("failed to load Elasticsearch URL from ESCLI_URL ({e})"),
-                    None,
-                ));
+                return Err(Error::new(format!(
+                    "failed to load Elasticsearch URL from ESCLI_URL ({e})"
+                )));
             }
         }
     }
@@ -252,10 +137,7 @@ impl SimpleClient {
                 match Url::parse(url_str.as_str()) {
                     Ok(parsed) => url = parsed,
                     Err(e) => {
-                        return Err(Error::new(
-                            format!("failed to parse URL {url_str} ({e})"),
-                            None,
-                        ));
+                        return Err(Error::new(format!("failed to parse URL {url_str} ({e})")));
                     }
                 };
                 let auth;
@@ -264,18 +146,16 @@ impl SimpleClient {
                         auth = Credentials::EncodedApiKey(api_key.to_string());
                     }
                     None => {
-                        return Err(Error::new(
-                            format!("could not find ES_LOCAL_API_KEY in start-local .env file"),
-                            None,
-                        ));
+                        return Err(Error::new(format!(
+                            "could not find ES_LOCAL_API_KEY in start-local .env file"
+                        )));
                     }
                 };
                 Ok(Self::new(url, auth))
             }
-            Err(e) => Err(Error::new(
-                format!("failed to load Elasticsearch details from start-local .env file ({e})"),
-                None,
-            )),
+            Err(e) => Err(Error::new(format!(
+                "failed to load Elasticsearch details from start-local .env file ({e})"
+            ))),
         }
     }
 
@@ -288,9 +168,9 @@ impl SimpleClient {
         Ok(response.status_code())
     }
 
-    pub async fn info(&self) -> Result<EsInfo, Box<dyn std::error::Error>> {
+    pub async fn info(&self) -> Result<RawInfo, Box<dyn std::error::Error>> {
         let response = self.elasticsearch.info().send().await?;
-        Ok(response.json::<EsInfo>().await?)
+        Ok(response.json::<RawInfo>().await?)
     }
 
     pub async fn get_index_list(
@@ -310,7 +190,7 @@ impl SimpleClient {
         &self,
         index: &str,
         mappings: &[String],
-    ) -> Result<EsCreated, Box<dyn std::error::Error>> {
+    ) -> Result<RawCreated, Box<dyn std::error::Error>> {
         let mut body = json!({
             "mappings": {
                 "properties": {
@@ -330,14 +210,19 @@ impl SimpleClient {
             .await
         {
             Ok(response) => match response.status_code().as_u16() {
-                200..=299 => Ok(response.json::<EsCreated>().await?),
-                _ => Err(Box::from(response.json::<Error>().await?)),
+                200..=299 => Ok(response.json::<RawCreated>().await?),
+                _ => Err(Box::from(Error::from_raw(
+                    response.json::<RawError>().await?,
+                ))),
             },
             Err(error) => Err(Box::from(error)),
         }
     }
 
-    pub async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn std::error::Error>> {
+    pub async fn delete_index(
+        &self,
+        index: &str,
+    ) -> Result<RawDeleted, Box<dyn std::error::Error>> {
         match self
             .elasticsearch
             .indices()
@@ -346,8 +231,10 @@ impl SimpleClient {
             .await
         {
             Ok(response) => match response.status_code().as_u16() {
-                200..=299 => Ok(response.json::<EsDeleted>().await?),
-                _ => Err(Box::from(response.json::<Error>().await?)),
+                200..=299 => Ok(response.json::<RawDeleted>().await?),
+                _ => Err(Box::from(Error::from_raw(
+                    response.json::<RawError>().await?,
+                ))),
             },
             Err(error) => Err(Box::from(error)),
         }
@@ -357,7 +244,7 @@ impl SimpleClient {
         &self,
         index: &str,
         csv_filenames: &[String],
-    ) -> Result<EsBulkSummary, Box<dyn std::error::Error>> {
+    ) -> Result<RawBulkSummary, Box<dyn std::error::Error>> {
         type Document = HashMap<String, Value>;
         let mut documents: Vec<Document> = Vec::new();
         for filename in csv_filenames.iter() {
@@ -379,7 +266,7 @@ impl SimpleClient {
             .refresh(Refresh::WaitFor)
             .send()
             .await?;
-        Ok(response.json::<EsBulkSummary>().await?)
+        Ok(response.json::<RawBulkSummary>().await?)
     }
 
     pub async fn search(
@@ -388,7 +275,7 @@ impl SimpleClient {
         query: &Option<String>,
         order_by: &Option<String>,
         limit: &Option<u16>,
-    ) -> Result<EsSearchResult, Box<dyn std::error::Error>> {
+    ) -> Result<RawSearchResult, Box<dyn std::error::Error>> {
         let target = &[index];
         let mut request = self.elasticsearch.search(SearchParts::Index(target));
         let mut order_by_pairs = Vec::new();
@@ -405,6 +292,121 @@ impl SimpleClient {
             body["size"] = json!(x);
         }
         let response = request.body(body).send().await?;
-        Ok(response.json::<EsSearchResult>().await?)
+        Ok(response.json::<RawSearchResult>().await?)
     }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Error {
+    description: String,
+}
+
+impl Error {
+    pub fn new(description: String) -> Self {
+        Error { description }
+    }
+
+    pub fn from_raw(raw_error: RawError) -> Self {
+        Error {
+            description: raw_error.error.reason.unwrap_or(raw_error.error.type_code),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error: {}", self.description)
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RawError {
+    pub error: RawErrorDetail,
+    pub status: u16,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RawErrorDetail {
+    #[serde(rename = "type")]
+    pub type_code: String,
+    pub reason: Option<String>,
+    pub root_cause: Option<Vec<RawErrorDetail>>,
+}
+
+impl std::error::Error for RawError {}
+
+impl std::fmt::Display for RawError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.error.reason {
+            Some(ref text) => write!(f, "Error: {}", text),
+            _ => write!(f, "Error: {}", self.error.type_code),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RawInfo {
+    pub name: String,
+    pub cluster_name: String,
+    pub cluster_uuid: String,
+    pub version: RawInfoVersion,
+    pub tagline: String,
+}
+
+#[derive(Deserialize)]
+pub struct RawInfoVersion {
+    pub number: String,
+    pub build_flavor: String,
+    pub build_type: String,
+    pub build_hash: String,
+    pub build_date: String,
+    pub build_snapshot: bool,
+    pub lucene_version: String,
+    pub minimum_wire_compatibility_version: String,
+    pub minimum_index_compatibility_version: String,
+}
+
+#[derive(Deserialize)]
+pub struct RawCreated {
+    pub acknowledged: bool,
+    pub index: String,
+}
+
+#[derive(Deserialize)]
+pub struct RawDeleted {
+    pub acknowledged: bool,
+}
+
+#[derive(Deserialize)]
+pub struct RawBulkSummary {
+    pub items: Vec<HashMap<String, RawBulkSummaryAction>>,
+}
+
+#[derive(Deserialize)]
+pub struct RawBulkSummaryAction {
+    pub _index: String,
+    pub _id: String,
+    pub _version: i32,
+    pub result: String,
+    pub _seq_no: i32,
+}
+
+#[derive(Deserialize)]
+pub struct RawSearchResult {
+    pub hits: RawSearchResultHits,
+}
+
+#[derive(Deserialize)]
+pub struct RawSearchResultHits {
+    pub hits: Vec<RawSearchResultHitsHit>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RawSearchResultHitsHit {
+    pub _index: String,
+    pub _id: String,
+    pub _score: Option<f64>,
+    pub _source: HashMap<String, Value>,
 }

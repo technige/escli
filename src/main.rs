@@ -1,5 +1,5 @@
 mod client;
-mod viz;
+mod data;
 
 use std::{
     collections::HashMap,
@@ -12,8 +12,8 @@ use std::{
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::Value;
 
-use client::{EsBulkSummary, EsInfo, EsSearchResult, SimpleClient};
-use viz::DataTable;
+use client::{RawBulkSummary, RawInfo, RawSearchResult, SimpleClient};
+use data::Table;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -191,7 +191,7 @@ async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn E
     Ok(())
 }
 
-fn print_info(info: &EsInfo) {
+fn print_info(info: &RawInfo) {
     println!("Name: {}", info.name);
     println!("Cluster Name: {}", info.cluster_name);
     println!("Cluster UUID: {}", info.cluster_uuid);
@@ -223,7 +223,7 @@ fn print_index_list(index_list: &HashMap<String, Value>, all: &bool) {
     }
 }
 
-fn print_bulk_summary(summary: &EsBulkSummary) {
+fn print_bulk_summary(summary: &RawBulkSummary) {
     let mut results: HashMap<String, usize> = HashMap::new();
     for item in summary.items.iter() {
         for (_key, value) in item.iter() {
@@ -235,7 +235,7 @@ fn print_bulk_summary(summary: &EsBulkSummary) {
     }
 }
 
-fn print_search_result(result: &EsSearchResult, format: &SearchResultFormat) {
+fn print_search_result(result: &RawSearchResult, format: &SearchResultFormat) {
     match format {
         SearchResultFormat::Raw => {
             for hit in result.hits.hits.iter() {
@@ -243,11 +243,15 @@ fn print_search_result(result: &EsSearchResult, format: &SearchResultFormat) {
             }
         }
         SearchResultFormat::Table => {
-            let mut table = DataTable::new();
+            let mut table = Table::new();
             for hit in result.hits.hits.iter() {
                 table.push_document(&hit._source);
             }
-            table.print();
+            if table.count_rows() == 0 {
+                println!("No rows")
+            } else {
+                table.print();
+            }
         }
     }
 }
