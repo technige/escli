@@ -180,18 +180,23 @@ async fn despatch(command: &Commands, es: &Es) -> Result<(), Box<dyn Error>> {
                     );
                 }
                 Err(error) => {
-                    eprintln!("{:?}", error);
+                    eprintln!("{}", error);
                     exit(1);
                 }
             }
         }
-        Commands::DeleteIndex { index } => {
-            let deleted = &es.delete_index(index).await?;
-            println!(
-                "Deleted index ({}acknowledged)",
-                if deleted.acknowledged { "" } else { "not " }
-            );
-        }
+        Commands::DeleteIndex { index } => match &es.delete_index(index).await {
+            Ok(deleted) => {
+                println!(
+                    "Deleted index ({}acknowledged)",
+                    if deleted.acknowledged { "" } else { "not " }
+                );
+            }
+            Err(error) => {
+                eprintln!("{}", error);
+                exit(1);
+            }
+        },
         Commands::Load {
             index,
             csv_filenames,

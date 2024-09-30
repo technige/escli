@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fs::File};
+use std::{collections::HashMap, error::Error, fmt::Display, fs::File};
 
 use elasticsearch::{
     auth::Credentials,
@@ -16,6 +16,31 @@ use serde_json::{json, Value};
 pub struct Es {
     url: Url,
     elasticsearch: Elasticsearch,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct EsError {
+    pub error: EsErrorDetail,
+    pub status: u16,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct EsErrorDetail {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub reason: Option<String>,
+    pub root_cause: Option<Vec<EsErrorDetail>>,
+}
+
+impl Error for EsError {}
+
+impl Display for EsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.error.reason {
+            Some(ref text) => write!(f, "Error: {}", text),
+            _ => write!(f, "Error: {}", self.error.error_type),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -147,21 +172,27 @@ impl Es {
             .await
         {
             Ok(response) => match response.status_code().as_u16() {
-                200 => Ok(response.json::<EsCreated>().await?),
-                _ => Ok(response.json::<EsCreated>().await?),
+                200..=299 => Ok(response.json::<EsCreated>().await?),
+                _ => Err(Box::from(response.json::<EsError>().await?)),
             },
             Err(error) => Err(Box::from(error)),
         }
     }
 
     pub async fn delete_index(&self, index: &str) -> Result<EsDeleted, Box<dyn Error>> {
-        let response = self
+        match self
             .elasticsearch
             .indices()
             .delete(IndicesDeleteParts::Index(&[index]))
             .send()
-            .await?;
-        Ok(response.json::<EsDeleted>().await?)
+            .await
+        {
+            Ok(response) => match response.status_code().as_u16() {
+                200..=299 => Ok(response.json::<EsDeleted>().await?),
+                _ => Err(Box::from(response.json::<EsError>().await?)),
+            },
+            Err(error) => Err(Box::from(error)),
+        }
     }
 
     pub async fn load(
