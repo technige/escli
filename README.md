@@ -47,12 +47,17 @@ This will generate an executable called `escli`.
 
 ## Addressing & Authentication
 
-The `escli` tool relies on connection details and credentials supplied through environment variables.
-The `ESCLI_URL` variable is required for addressing.
-For API key authentication, set the `ESCLI_API_KEY` variable;
-alternatively, for user and password authentication, `ESCLI_USER` and `ESCLI_PASSWORD` can be used.
+The `escli` tool looks for connection details and credentials supplied through environment variables.
+If these cannot be found, it then sniffs for a [start-local](https://github.com/elastic/start-local) `.env` file for settings.
+Overall, the sequence of checks is as follows:
 
-The following variables are accepted:
+1. Check for `ESCLI_URL` and `ESCLI_API_KEY` environment variables
+2. Check for `ESCLI_URL` and `ESCLI_USER`/`ESCLI_PASSWORD` environment variables
+3. Check for `.env` file in current directory
+4. Check for `.env` file in `elastic-start-local` subdirectory
+5. Give up and fail
+
+The available environment variables are defined below.
 
 ### `ESCLI_URL`
 The URL to which to connect in the form `scheme://host:port`.

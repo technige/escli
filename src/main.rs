@@ -102,7 +102,7 @@ enum SearchResultFormat {
 async fn main() -> Result<ExitCode, Box<dyn Error>> {
     // TODO: detect presence of start-local (look for .env file or check local ports)
     let args = CommandLine::parse();
-    match SimpleClient::from_env_vars() {
+    match SimpleClient::default() {
         Ok(es) => match despatch(&args.command, &es).await {
             Ok(_) => Ok(ExitCode::SUCCESS),
             Err(_) => Ok(ExitCode::FAILURE),

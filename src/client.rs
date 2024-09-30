@@ -1,4 +1,10 @@
-use std::{collections::HashMap, env, fmt::Display, fs::File};
+use std::{
+    collections::HashMap,
+    env,
+    fmt::Display,
+    fs::{read_to_string, File},
+    path::Path,
+};
 
 use elasticsearch::{
     auth::Credentials,
@@ -142,6 +148,36 @@ impl SimpleClient {
         }
     }
 
+    /// Creates a new client by first checking environment variables, then
+    /// sniffing for a _start-local_ `.env` file, if these are not found.
+    /// Overall, the sequence of checks is as follows:
+    ///
+    /// 1. Check for `ESCLI_URL` and `ESCLI_API_KEY` env vars
+    /// 2. Check for `ESCLI_URL` and `ESCLI_USER`/`ESCLI_PASSWORD` env vars
+    /// 3. Check for `.env` file in current directory
+    /// 4. Check for `.env` file in `elastic-start-local` subdirectory
+    /// 5. Give up and fail
+    ///
+    pub fn default() -> Result<Self, Error> {
+        match Self::from_env_vars() {
+            Ok(client) => Ok(client),
+            Err(_) => {
+                match Self::for_start_local(Path::new(".")) {
+                    Ok(client) => Ok(client),
+                    Err(_) => match Self::for_start_local(Path::new("elastic-start-local")) {
+                        Ok(client) => Ok(client),
+                        Err(_) => {
+                            Err(Error::new(
+                                format!("failed to initialise client from either environment variables or start-local .env file"),
+                                None,
+                            ))
+                        }
+                    },
+                }
+            }
+        }
+    }
+
     /// Creates a new client by reading configuration values from environment
     /// variables.
     ///
@@ -190,6 +226,56 @@ impl SimpleClient {
                     None,
                 ));
             }
+        }
+    }
+
+    pub fn for_start_local(path: &Path) -> Result<Self, Error> {
+        match read_to_string(path.join(".env")) {
+            Ok(string) => {
+                let mut env_vars: HashMap<&str, &str> = HashMap::new();
+                for line in string.lines().into_iter() {
+                    match line.split_once('=') {
+                        Some((name, value)) => {
+                            env_vars.insert(name, value);
+                        }
+                        None => {}
+                    }
+                }
+                let url_str = format!(
+                    "http://localhost:{}",
+                    match env_vars.get("ES_LOCAL_PORT") {
+                        Some(port) => port,
+                        None => "9200",
+                    }
+                );
+                let url;
+                match Url::parse(url_str.as_str()) {
+                    Ok(parsed) => url = parsed,
+                    Err(e) => {
+                        return Err(Error::new(
+                            format!("failed to parse URL {url_str} ({e})"),
+                            None,
+                        ));
+                    }
+                };
+                let auth;
+                match env_vars.get("ES_LOCAL_API_KEY") {
+                    Some(api_key) => {
+                        auth = Credentials::EncodedApiKey(api_key.to_string());
+                    }
+                    None => {
+                        return Err(Error::new(
+                            format!("could not find ES_LOCAL_API_KEY in start-local .env file"),
+                            None,
+                        ));
+                    }
+                };
+                Ok(Self::new(url, auth))
+            }
+            Err(e) => Err(Error::new(
+                format!("failed to load Elasticsearch details from start-local .env file ({e})"),
+                None,
+            )),
         }
     }
 
