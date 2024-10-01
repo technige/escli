@@ -153,9 +153,11 @@ impl SimpleClient {
         &self.url
     }
 
-    pub async fn ping(&self) -> Result<StatusCode, Box<dyn std::error::Error>> {
-        let response = self.elasticsearch.ping().send().await?;
-        Ok(response.status_code())
+    pub async fn ping(&self) -> Result<StatusCode, Error> {
+        match self.elasticsearch.ping().send().await {
+            Ok(response) => Ok(response.status_code()),
+            Err(e) => Err(Error::from_client_error(&e)),
+        }
     }
 
     pub async fn info(&self) -> Result<RawInfo, Box<dyn std::error::Error>> {

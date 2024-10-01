@@ -116,26 +116,7 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
 async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn Error>> {
     match command {
         Commands::Ping { count, interval } => {
-            println!("HEAD {}", es.url());
-            let mut seq: usize = 0;
-            loop {
-                seq += 1;
-                let t0 = SystemTime::now();
-                let result = es.ping().await;
-                let elapsed = t0.elapsed().expect("System time error");
-                match result {
-                    Ok(status_code) => {
-                        println!("{status_code}: seq={seq} time={elapsed:?}");
-                    }
-                    Err(e) => {
-                        println!("{e}: seq={seq} time={elapsed:?}");
-                    }
-                }
-                if count.is_some_and(|x| seq >= x) {
-                    break;
-                }
-                sleep(Duration::from_secs_f64(*interval));
-            }
+            ping(es, count, interval).await;
         }
         Commands::Info {} => {
             print_info(&es.info().await?);
@@ -195,6 +176,29 @@ async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn E
         }
     }
     Ok(())
+}
+
+async fn ping(es: &SimpleClient, count: &Option<usize>, interval: &f64) {
+    println!("HEAD {}", es.url());
+    let mut seq: usize = 0;
+    loop {
+        seq += 1;
+        let t0 = SystemTime::now();
+        let result = es.ping().await;
+        let elapsed = t0.elapsed().expect("System time error");
+        match result {
+            Ok(status_code) => {
+                println!("{status_code}: seq={seq} time={elapsed:?}");
+            }
+            Err(e) => {
+                println!("{e}: seq={seq} time={elapsed:?}");
+            }
+        }
+        if count.is_some_and(|x| seq >= x) {
+            break;
+        }
+        sleep(Duration::from_secs_f64(*interval));
+    }
 }
 
 fn print_info(info: &RawInfo) {
