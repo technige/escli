@@ -184,7 +184,13 @@ async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn E
             limit,
             format,
         } => {
-            let result = &es.search(index, query, order_by, limit).await?;
+            let result = &match es.search(index, query, order_by, limit).await {
+                Ok(it) => it,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    exit(1);
+                }
+            };
             print_search_result(result, format);
         }
     }

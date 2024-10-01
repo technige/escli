@@ -57,7 +57,7 @@ impl SimpleClient {
                     Err(_) => match Self::for_start_local(Path::new("elastic-start-local")) {
                         Ok(client) => Ok(client),
                         Err(_) => {
-                            Err(Error::new(format!("failed to initialise client from either environment variables or start-local .env file")))
+                            Err(Error::new("failed to initialise client from either environment variables or start-local .env file".to_string()))
                         }
                     },
                 }
@@ -100,17 +100,13 @@ impl SimpleClient {
                             }
                         },
                     }
-                    return Ok(Self::new(url, auth));
+                    Ok(Self::new(url, auth))
                 }
-                Err(e) => {
-                    return Err(Error::new(format!("failed to parse ESCLI_URL ({e})")));
-                }
+                Err(e) => Err(Error::new(format!("failed to parse ESCLI_URL ({e})"))),
             },
-            Err(e) => {
-                return Err(Error::new(format!(
-                    "failed to load Elasticsearch URL from ESCLI_URL ({e})"
-                )));
-            }
+            Err(e) => Err(Error::new(format!(
+                "failed to load Elasticsearch URL from ESCLI_URL ({e})"
+            ))),
         }
     }
 
@@ -118,12 +114,9 @@ impl SimpleClient {
         match read_to_string(path.join(".env")) {
             Ok(string) => {
                 let mut env_vars: HashMap<&str, &str> = HashMap::new();
-                for line in string.lines().into_iter() {
-                    match line.split_once('=') {
-                        Some((name, value)) => {
-                            env_vars.insert(name, value);
-                        }
-                        None => {}
+                for line in string.lines() {
+                    if let Some((name, value)) = line.split_once('=') {
+                        env_vars.insert(name, value);
                     }
                 }
                 let url_str = format!(
@@ -133,22 +126,19 @@ impl SimpleClient {
                         None => "9200",
                     }
                 );
-                let url;
-                match Url::parse(url_str.as_str()) {
-                    Ok(parsed) => url = parsed,
+
+                let url = match Url::parse(url_str.as_str()) {
+                    Ok(parsed) => parsed,
                     Err(e) => {
                         return Err(Error::new(format!("failed to parse URL {url_str} ({e})")));
                     }
                 };
-                let auth;
-                match env_vars.get("ES_LOCAL_API_KEY") {
-                    Some(api_key) => {
-                        auth = Credentials::EncodedApiKey(api_key.to_string());
-                    }
+                let auth = match env_vars.get("ES_LOCAL_API_KEY") {
+                    Some(api_key) => Credentials::EncodedApiKey(api_key.to_string()),
                     None => {
-                        return Err(Error::new(format!(
-                            "could not find ES_LOCAL_API_KEY in start-local .env file"
-                        )));
+                        return Err(Error::new(
+                            "could not find ES_LOCAL_API_KEY in start-local .env file".to_string(),
+                        ));
                     }
                 };
                 Ok(Self::new(url, auth))
@@ -211,8 +201,8 @@ impl SimpleClient {
         {
             Ok(response) => match response.status_code().as_u16() {
                 200..=299 => Ok(response.json::<RawCreated>().await?),
-                _ => Err(Box::from(Error::from_raw(
-                    response.json::<RawError>().await?,
+                _ => Err(Box::from(Error::from_server_error(
+                    &response.json::<RawError>().await?,
                 ))),
             },
             Err(error) => Err(Box::from(error)),
@@ -232,8 +222,8 @@ impl SimpleClient {
         {
             Ok(response) => match response.status_code().as_u16() {
                 200..=299 => Ok(response.json::<RawDeleted>().await?),
-                _ => Err(Box::from(Error::from_raw(
-                    response.json::<RawError>().await?,
+                _ => Err(Box::from(Error::from_server_error(
+                    &response.json::<RawError>().await?,
                 ))),
             },
             Err(error) => Err(Box::from(error)),
@@ -275,7 +265,7 @@ impl SimpleClient {
         query: &Option<String>,
         order_by: &Option<String>,
         limit: &Option<u16>,
-    ) -> Result<RawSearchResult, Box<dyn std::error::Error>> {
+    ) -> Result<RawSearchResult, Error> {
         let target = &[index];
         let mut request = self.elasticsearch.search(SearchParts::Index(target));
         let mut order_by_pairs = Vec::new();
@@ -291,8 +281,21 @@ impl SimpleClient {
         if let Some(x) = limit {
             body["size"] = json!(x);
         }
-        let response = request.body(body).send().await?;
-        Ok(response.json::<RawSearchResult>().await?)
+        match request.body(body).send().await {
+            Ok(response) => match response.status_code().as_u16() {
+                200..=299 => Ok(match response.json::<RawSearchResult>().await {
+                    Ok(data) => data,
+                    Err(e) => return Err(Error::from_client_error(&e)), // failed to decode search response body
+                }),
+                _ => Err(Error::from_server_error(
+                    &match response.json::<RawError>().await {
+                        Ok(data) => data,
+                        Err(e) => return Err(Error::from_client_error(&e)), // failed to decode error response body
+                    },
+                )),
+            },
+            Err(e) => Err(Error::from_client_error(&e)), // failed to send
+        }
     }
 }
 
@@ -306,9 +309,29 @@ impl Error {
         Error { description }
     }
 
-    pub fn from_raw(raw_error: RawError) -> Self {
+    pub fn from_client_error(error: &elasticsearch::Error) -> Self {
         Error {
-            description: raw_error.error.reason.unwrap_or(raw_error.error.type_code),
+            description: error.to_string(),
+        }
+    }
+
+    pub fn from_server_error(raw_error: &RawError) -> Self {
+        let detail: &RawErrorDetail = if raw_error
+            .error
+            .root_cause
+            .as_ref()
+            .is_some_and(|x| !x.is_empty())
+        {
+            &raw_error.error.root_cause.as_ref().unwrap()[0]
+        } else {
+            &raw_error.error
+        };
+        Error {
+            description: detail
+                .reason
+                .as_ref()
+                .unwrap_or(&raw_error.error.type_code)
+                .to_string(),
         }
     }
 }
