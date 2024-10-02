@@ -7,12 +7,13 @@ use std::{
 
 use elasticsearch::{
     auth::Credentials,
+    cat::CatIndicesParts,
     http::{
         transport::{SingleNodeConnectionPool, TransportBuilder},
         StatusCode, Url,
     },
-    indices::{IndicesCreateParts, IndicesDeleteParts, IndicesGetParts},
-    params::Refresh,
+    indices::{IndicesCreateParts, IndicesDeleteParts},
+    params::{ExpandWildcards, Refresh},
     BulkOperation, BulkParts, Elasticsearch, SearchParts,
 };
 use serde::Deserialize;
@@ -160,22 +161,95 @@ impl SimpleClient {
         }
     }
 
-    pub async fn info(&self) -> Result<RawInfo, Box<dyn std::error::Error>> {
-        let response = self.elasticsearch.info().send().await?;
-        Ok(response.json::<RawInfo>().await?)
+    pub async fn info(&self) -> Result<RawInfo, Error> {
+        match self.elasticsearch.info().send().await {
+            Ok(response) => match response.json::<RawInfo>().await {
+                Ok(info) => Ok(info),
+                Err(e) => Err(Error::from_client_error(&e)),
+            },
+            Err(e) => Err(Error::from_client_error(&e)),
+        }
     }
 
     pub async fn get_index_list(
         &self,
         patterns: &[&str],
-    ) -> Result<HashMap<String, Value>, Box<dyn std::error::Error>> {
-        let response = self
+        all: bool,
+        open: bool,
+        closed: bool,
+    ) -> Result<Vec<IndexDetail>, Error> {
+        match self
             .elasticsearch
-            .indices()
-            .get(IndicesGetParts::Index(patterns))
+            .cat()
+            .indices(CatIndicesParts::Index(patterns))
+            .format("json")
+            .bytes(elasticsearch::params::Bytes::B)
+            .expand_wildcards(if all && open && closed {
+                &[
+                    ExpandWildcards::Open,
+                    ExpandWildcards::Closed,
+                    ExpandWildcards::Hidden,
+                ]
+            } else if all && open {
+                &[ExpandWildcards::Open, ExpandWildcards::Hidden]
+            } else if all && closed {
+                &[ExpandWildcards::Closed, ExpandWildcards::Hidden]
+            } else if open && closed {
+                &[ExpandWildcards::Open, ExpandWildcards::Closed]
+            } else if all {
+                &[ExpandWildcards::All]
+            } else if open {
+                &[ExpandWildcards::Open]
+            } else if closed {
+                &[ExpandWildcards::Closed]
+            } else {
+                &[ExpandWildcards::Open]
+            })
             .send()
-            .await?;
-        Ok(response.json::<HashMap<String, Value>>().await?)
+            .await
+        {
+            Ok(response) => Ok(match response.json::<Vec<HashMap<String, Value>>>().await {
+                Ok(raw) => raw
+                    .iter()
+                    .map(|entry| IndexDetail {
+                        health: entry["health"].as_str().unwrap_or("unknown").to_string(),
+                        status: entry["status"].as_str().unwrap_or("unknown").to_string(),
+                        name: entry["index"].as_str().unwrap_or("unknown").to_string(),
+                        uuid: entry["uuid"].as_str().unwrap_or("unknown").to_string(),
+                        docs_count: match entry["docs.count"].as_str() {
+                            Some(string_value) => match string_value.parse::<u64>() {
+                                Ok(value) => Some(value),
+                                Err(_) => None,
+                            },
+                            None => None,
+                        },
+                        docs_deleted: match entry["docs.deleted"].as_str() {
+                            Some(string_value) => match string_value.parse::<u64>() {
+                                Ok(value) => Some(value),
+                                Err(_) => None,
+                            },
+                            None => None,
+                        },
+                        store_size: match entry["store.size"].as_str() {
+                            Some(string_value) => match string_value.parse::<u64>() {
+                                Ok(value) => Some(value),
+                                Err(_) => None,
+                            },
+                            None => None,
+                        },
+                        dataset_size: match entry["dataset.size"].as_str() {
+                            Some(string_value) => match string_value.parse::<u64>() {
+                                Ok(value) => Some(value),
+                                Err(_) => None,
+                            },
+                            None => None,
+                        },
+                    })
+                    .collect(),
+                Err(e) => return Err(Error::from_client_error(&e)),
+            }),
+            Err(e) => return Err(Error::from_client_error(&e)),
+        }
     }
 
     pub async fn create_index(
@@ -434,4 +508,15 @@ pub struct RawSearchResultHitsHit {
     pub _id: String,
     pub _score: Option<f64>,
     pub _source: HashMap<String, Value>,
+}
+
+pub struct IndexDetail {
+    pub health: String,
+    pub status: String,
+    pub name: String,
+    pub uuid: String,
+    pub docs_count: Option<u64>,
+    pub docs_deleted: Option<u64>,
+    pub store_size: Option<u64>,
+    pub dataset_size: Option<u64>,
 }

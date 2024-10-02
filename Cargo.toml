@@ -18,3 +18,4 @@ tokio = { version = "*", features = ["full"] }
 clap = { version = "4.0", features = ["derive"] }
 csv = "1.1"
 tabled = "0.16.0"
+byte-unit = "5.1.4"

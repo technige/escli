@@ -3,17 +3,17 @@ mod data;
 
 use std::{
     collections::HashMap,
-    error::Error,
     process::{exit, ExitCode},
     thread::sleep,
     time::{Duration, SystemTime},
 };
 
+use byte_unit::{Byte, UnitType};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::Value;
 
-use client::{RawBulkSummary, RawInfo, RawSearchResult, SimpleClient};
+use client::{RawBulkSummary, RawSearchResult, SimpleClient};
 use data::Table;
+use tabled::settings::{object::Columns, Alignment, Padding, Style};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -41,10 +41,18 @@ enum Commands {
 
     #[command(name = "ls")]
     #[command(about = "List available indexes")]
-    GetIndexList {
+    ListIndexes {
         #[arg(short = 'a', long = "all")]
-        #[arg(help = "Include indexes starting with '.'")]
+        #[arg(help = "Match any data stream or index, including hidden ones")]
         all: bool,
+        #[arg(short = 'o', long = "open")]
+        #[arg(help = "Match open, non-hidden indices (also matches any non-hidden data stream)")]
+        open: bool,
+        #[arg(short = 'c', long = "closed")]
+        #[arg(help = "Match closed, non-hidden indices (also matches any non-hidden data stream)")]
+        closed: bool,
+        #[arg(help = "Index name or pattern to include in list")]
+        index: Option<String>,
     },
 
     #[command(name = "mk")]
@@ -99,31 +107,27 @@ enum SearchResultFormat {
 }
 
 #[tokio::main]
-async fn main() -> Result<ExitCode, Box<dyn Error>> {
+async fn main() -> ExitCode {
     let args = CommandLine::parse();
     match SimpleClient::default() {
-        Ok(es) => match despatch(&args.command, &es).await {
-            Ok(_) => Ok(ExitCode::SUCCESS),
-            Err(_) => Ok(ExitCode::FAILURE),
-        },
+        Ok(es) => despatch(&args.command, &es).await,
         Err(e) => {
             eprintln!("{}", e);
-            exit(1);
+            ExitCode::FAILURE
         }
     }
 }
 
-async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn Error>> {
+async fn despatch(command: &Commands, es: &SimpleClient) -> ExitCode {
     match command {
-        Commands::Ping { count, interval } => {
-            ping(es, count, interval).await;
-        }
-        Commands::Info {} => {
-            print_info(&es.info().await?);
-        }
-        Commands::GetIndexList { all } => {
-            print_index_list(&es.get_index_list(&["*"]).await?, all);
-        }
+        Commands::Ping { count, interval } => ping(es, count, interval).await,
+        Commands::Info {} => print_info(es).await,
+        Commands::ListIndexes {
+            index,
+            all,
+            open,
+            closed,
+        } => print_index_list(es, index, *all, *open, *closed).await,
         Commands::CreateIndex { index, mappings } => {
             match &es.create_index(index, mappings).await {
                 Ok(created) => {
@@ -137,26 +141,37 @@ async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn E
                     eprintln!("{}", error);
                     exit(1);
                 }
-            }
+            };
+            ExitCode::SUCCESS
         }
-        Commands::DeleteIndex { index } => match &es.delete_index(index).await {
-            Ok(deleted) => {
-                println!(
-                    "Deleted index ({}acknowledged)",
-                    if deleted.acknowledged { "" } else { "not " }
-                );
+        Commands::DeleteIndex { index } => {
+            match &es.delete_index(index).await {
+                Ok(deleted) => {
+                    println!(
+                        "Deleted index ({}acknowledged)",
+                        if deleted.acknowledged { "" } else { "not " }
+                    );
+                }
+                Err(error) => {
+                    eprintln!("{}", error);
+                    exit(1);
+                }
             }
-            Err(error) => {
-                eprintln!("{}", error);
-                exit(1);
-            }
-        },
+            ExitCode::SUCCESS
+        }
         Commands::Load {
             index,
             csv_filenames,
         } => {
-            let summary = &es.load(index, csv_filenames).await?;
+            let summary = &match es.load(index, csv_filenames).await {
+                Ok(it) => it,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return ExitCode::FAILURE;
+                }
+            };
             print_bulk_summary(summary);
+            ExitCode::SUCCESS
         }
         Commands::Search {
             index,
@@ -173,12 +188,12 @@ async fn despatch(command: &Commands, es: &SimpleClient) -> Result<(), Box<dyn E
                 }
             };
             print_search_result(result, format);
+            ExitCode::SUCCESS
         }
     }
-    Ok(())
 }
 
-async fn ping(es: &SimpleClient, count: &Option<usize>, interval: &f64) {
+async fn ping(es: &SimpleClient, count: &Option<usize>, interval: &f64) -> ExitCode {
     println!("HEAD {}", es.url());
     let mut seq: usize = 0;
     loop {
@@ -199,36 +214,101 @@ async fn ping(es: &SimpleClient, count: &Option<usize>, interval: &f64) {
         }
         sleep(Duration::from_secs_f64(*interval));
     }
+    ExitCode::SUCCESS
 }
 
-fn print_info(info: &RawInfo) {
-    println!("Name: {}", info.name);
-    println!("Cluster Name: {}", info.cluster_name);
-    println!("Cluster UUID: {}", info.cluster_uuid);
-    println!("Version:");
-    println!("  Number: {}", info.version.number);
-    println!("  Build Flavor: {}", info.version.build_flavor);
-    println!("  Build Type: {}", info.version.build_type);
-    println!("  Build Hash: {}", info.version.build_hash);
-    println!("  Build Date: {}", info.version.build_date);
-    println!("  Build Snapshot: {}", info.version.build_snapshot);
-    println!("  Lucene Version: {}", info.version.lucene_version);
-    println!(
-        "  Minimum Wire Compatibility Version: {}",
-        info.version.minimum_wire_compatibility_version
-    );
-    println!(
-        "  Minimum Index Compatibility Version: {}",
-        info.version.minimum_index_compatibility_version
-    );
-    println!("Tagline: {}", info.tagline);
+async fn print_info(es: &SimpleClient) -> ExitCode {
+    match es.info().await {
+        Ok(info) => {
+            println!("Name: {}", info.name);
+            println!("Cluster Name: {}", info.cluster_name);
+            println!("Cluster UUID: {}", info.cluster_uuid);
+            println!("Version:");
+            println!("  Number: {}", info.version.number);
+            println!("  Build Flavor: {}", info.version.build_flavor);
+            println!("  Build Type: {}", info.version.build_type);
+            println!("  Build Hash: {}", info.version.build_hash);
+            println!("  Build Date: {}", info.version.build_date);
+            println!("  Build Snapshot: {}", info.version.build_snapshot);
+            println!("  Lucene Version: {}", info.version.lucene_version);
+            println!(
+                "  Minimum Wire Compatibility Version: {}",
+                info.version.minimum_wire_compatibility_version
+            );
+            println!(
+                "  Minimum Index Compatibility Version: {}",
+                info.version.minimum_index_compatibility_version
+            );
+            println!("Tagline: {}", info.tagline);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            ExitCode::FAILURE
+        }
+    }
 }
 
-fn print_index_list(index_list: &HashMap<String, Value>, all: &bool) {
-    // TODO: tabulate
-    for (key, _value) in index_list.iter() {
-        if *all || !key.starts_with('.') {
-            println!("{} {}", key, _value);
+async fn print_index_list(
+    es: &SimpleClient,
+    index: &Option<String>,
+    all: bool,
+    open: bool,
+    closed: bool,
+) -> ExitCode {
+    match es
+        .get_index_list(
+            &[index.clone().unwrap_or(String::from("*")).as_str()],
+            all,
+            open,
+            closed,
+        )
+        .await
+    {
+        Ok(index_list) => {
+            let mut builder = tabled::builder::Builder::default();
+            let mut has_rows = false;
+            for entry in index_list.iter() {
+                if all || !entry.name.starts_with('.') {
+                    builder.push_record(vec![
+                        match entry.health.as_str() {
+                            "green" => "🟢",
+                            "yellow" => "🟡",
+                            "red" => "🔴",
+                            _ => "⚫",
+                        },
+                        &entry.uuid,
+                        &entry.name,
+                        &format!("{} docs", entry.docs_count.unwrap_or(0),),
+                        &format!(
+                            "{:-#.1}",
+                            Byte::from_u64(entry.dataset_size.unwrap_or(0))
+                                .get_appropriate_unit(UnitType::Decimal)
+                        ),
+                        match entry.status.as_str() {
+                            "closed" => "🔒",
+                            _ => "",
+                        },
+                    ]);
+                    has_rows = true;
+                }
+            }
+            if has_rows {
+                println!(
+                    "{}",
+                    builder
+                        .build()
+                        .with(Style::empty())
+                        .modify(Columns::first(), Padding::new(0, 1, 0, 0))
+                        .modify(Columns::single(3), Alignment::right())
+                        .modify(Columns::single(4), Alignment::right())
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            ExitCode::FAILURE
         }
     }
 }
