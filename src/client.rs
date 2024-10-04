@@ -58,7 +58,10 @@ impl SimpleClient {
                     Err(_) => match Self::for_start_local(Path::new("elastic-start-local")) {
                         Ok(client) => Ok(client),
                         Err(_) => {
-                            Err(Error::new("failed to initialise client from either environment variables or start-local .env file".to_string()))
+                            Err(Error::new(
+                                ErrorType::ConfigurationError,
+                                "failed to initialise client from either environment variables or start-local .env file".to_string()
+                            ))
                         }
                     },
                 }
@@ -95,19 +98,24 @@ impl SimpleClient {
                                 );
                             }
                             Err(e) => {
-                                return Err(Error::new(format!(
-                                    "failed to load Elasticsearch credentials from either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD ({e})"
-                                )));
+                                return Err(Error::new(
+                                    ErrorType::ConfigurationError,
+                                    format!("failed to load Elasticsearch credentials from either ESCLI_API_KEY or ESCLI_USER/ESCLI_PASSWORD ({e})")
+                                ));
                             }
                         },
                     }
                     Ok(Self::new(url, auth))
                 }
-                Err(e) => Err(Error::new(format!("failed to parse ESCLI_URL ({e})"))),
+                Err(e) => Err(Error::new(
+                    ErrorType::ConfigurationError,
+                    format!("failed to parse ESCLI_URL ({e})"),
+                )),
             },
-            Err(e) => Err(Error::new(format!(
-                "failed to load Elasticsearch URL from ESCLI_URL ({e})"
-            ))),
+            Err(e) => Err(Error::new(
+                ErrorType::ConfigurationError,
+                format!("failed to load Elasticsearch URL from ESCLI_URL ({e})"),
+            )),
         }
     }
 
@@ -131,22 +139,27 @@ impl SimpleClient {
                 let url = match Url::parse(url_str.as_str()) {
                     Ok(parsed) => parsed,
                     Err(e) => {
-                        return Err(Error::new(format!("failed to parse URL {url_str} ({e})")));
+                        return Err(Error::new(
+                            ErrorType::ConfigurationError,
+                            format!("failed to parse URL {url_str} ({e})"),
+                        ));
                     }
                 };
                 let auth = match env_vars.get("ES_LOCAL_API_KEY") {
                     Some(api_key) => Credentials::EncodedApiKey(api_key.to_string()),
                     None => {
                         return Err(Error::new(
+                            ErrorType::ConfigurationError,
                             "could not find ES_LOCAL_API_KEY in start-local .env file".to_string(),
                         ));
                     }
                 };
                 Ok(Self::new(url, auth))
             }
-            Err(e) => Err(Error::new(format!(
-                "failed to load Elasticsearch details from start-local .env file ({e})"
-            ))),
+            Err(e) => Err(Error::new(
+                ErrorType::ConfigurationError,
+                format!("failed to load Elasticsearch details from start-local .env file ({e})"),
+            )),
         }
     }
 
@@ -208,47 +221,65 @@ impl SimpleClient {
             .send()
             .await
         {
-            Ok(response) => Ok(match response.json::<Vec<HashMap<String, Value>>>().await {
-                Ok(raw) => raw
-                    .iter()
-                    .map(|entry| IndexDetail {
-                        health: entry["health"].as_str().unwrap_or("unknown").to_string(),
-                        status: entry["status"].as_str().unwrap_or("unknown").to_string(),
-                        name: entry["index"].as_str().unwrap_or("unknown").to_string(),
-                        uuid: entry["uuid"].as_str().unwrap_or("unknown").to_string(),
-                        docs_count: match entry["docs.count"].as_str() {
-                            Some(string_value) => match string_value.parse::<u64>() {
-                                Ok(value) => Some(value),
-                                Err(_) => None,
+            Ok(response) => match response.status_code().as_u16() {
+                200..=299 => Ok(match response.json::<Vec<HashMap<String, Value>>>().await {
+                    Ok(raw) => raw
+                        .iter()
+                        .map(|entry| IndexDetail {
+                            health: entry["health"].as_str().unwrap_or("unknown").to_string(),
+                            status: entry["status"].as_str().unwrap_or("unknown").to_string(),
+                            name: entry["index"].as_str().unwrap_or("unknown").to_string(),
+                            uuid: entry["uuid"].as_str().unwrap_or("unknown").to_string(),
+                            docs_count: match entry["docs.count"].as_str() {
+                                Some(string_value) => match string_value.parse::<u64>() {
+                                    Ok(value) => Some(value),
+                                    Err(_) => None,
+                                },
+                                None => None,
                             },
-                            None => None,
-                        },
-                        docs_deleted: match entry["docs.deleted"].as_str() {
-                            Some(string_value) => match string_value.parse::<u64>() {
-                                Ok(value) => Some(value),
-                                Err(_) => None,
+                            docs_deleted: match entry["docs.deleted"].as_str() {
+                                Some(string_value) => match string_value.parse::<u64>() {
+                                    Ok(value) => Some(value),
+                                    Err(_) => None,
+                                },
+                                None => None,
                             },
-                            None => None,
-                        },
-                        store_size: match entry["store.size"].as_str() {
-                            Some(string_value) => match string_value.parse::<u64>() {
-                                Ok(value) => Some(value),
-                                Err(_) => None,
+                            store_size: match entry["store.size"].as_str() {
+                                Some(string_value) => match string_value.parse::<u64>() {
+                                    Ok(value) => Some(value),
+                                    Err(_) => None,
+                                },
+                                None => None,
                             },
-                            None => None,
-                        },
-                        dataset_size: match entry["dataset.size"].as_str() {
-                            Some(string_value) => match string_value.parse::<u64>() {
-                                Ok(value) => Some(value),
-                                Err(_) => None,
+                            dataset_size: match entry["dataset.size"].as_str() {
+                                Some(string_value) => match string_value.parse::<u64>() {
+                                    Ok(value) => Some(value),
+                                    Err(_) => None,
+                                },
+                                None => None,
                             },
-                            None => None,
-                        },
-                    })
-                    .collect(),
-                Err(e) => return Err(Error::from_client_error(&e)),
-            }),
-            Err(e) => return Err(Error::from_client_error(&e)),
+                        })
+                        .collect(),
+                    Err(e) => {
+                        // failed to decode response body
+                        return Err(Error::from_client_error(&e));
+                    }
+                }),
+                _ => Err(Error::from_server_error(
+                    // did not receive 2xx status code
+                    &match response.json::<RawError>().await {
+                        Ok(raw) => raw,
+                        Err(e) => {
+                            // failed to decode error response body
+                            return Err(Error::from_client_error(&e));
+                        }
+                    },
+                )),
+            },
+            Err(e) => {
+                // failed to carry out request-response
+                Err(Error::from_client_error(&e))
+            }
         }
     }
 
@@ -256,7 +287,7 @@ impl SimpleClient {
         &self,
         index: &str,
         mappings: &[String],
-    ) -> Result<RawCreated, Box<dyn std::error::Error>> {
+    ) -> Result<RawCreated, Error> {
         let mut body = json!({
             "mappings": {
                 "properties": {
@@ -276,12 +307,18 @@ impl SimpleClient {
             .await
         {
             Ok(response) => match response.status_code().as_u16() {
-                200..=299 => Ok(response.json::<RawCreated>().await?),
-                _ => Err(Box::from(Error::from_server_error(
-                    &response.json::<RawError>().await?,
-                ))),
+                200..=299 => Ok(match response.json::<RawCreated>().await {
+                    Ok(raw) => raw,
+                    Err(e) => return Err(Error::from_client_error(&e)),
+                }),
+                _ => Err(Error::from_server_error(
+                    &match response.json::<RawError>().await {
+                        Ok(raw) => raw,
+                        Err(e) => return Err(Error::from_client_error(&e)),
+                    },
+                )),
             },
-            Err(error) => Err(Box::from(error)),
+            Err(e) => Err(Error::from_client_error(&e)),
         }
     }
 
@@ -375,18 +412,30 @@ impl SimpleClient {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug)]
+pub enum ErrorType {
+    ConfigurationError,
+    ClientError,
+    ServerError(u16),
+}
+
+#[derive(Debug)]
 pub struct Error {
+    subtype: ErrorType,
     description: String,
 }
 
 impl Error {
-    pub fn new(description: String) -> Self {
-        Error { description }
+    pub fn new(subtype: ErrorType, description: String) -> Self {
+        Error {
+            subtype,
+            description,
+        }
     }
 
     pub fn from_client_error(error: &elasticsearch::Error) -> Self {
         Error {
+            subtype: ErrorType::ClientError,
             description: error.to_string(),
         }
     }
@@ -403,6 +452,7 @@ impl Error {
             &raw_error.error
         };
         Error {
+            subtype: ErrorType::ServerError(raw_error.status),
             description: detail
                 .reason
                 .as_ref()
@@ -416,7 +466,7 @@ impl std::error::Error for Error {}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error: {}", self.description)
+        write!(f, "{:?}: {}", self.subtype, self.description)
     }
 }
 
